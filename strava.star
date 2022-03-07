@@ -119,7 +119,7 @@ def main(config):
 
         data = response.json()
         athlete = int(float(data["id"]))
-        cache.set(GLOBAL_CACHE_PREFIX + "athlete_id", str(athlete), ttl_seconds=CACHE_TTL)
+        cache.set(GLOBAL_CACHE_PREFIX + "athlete_id", str(athlete), ttl_seconds = CACHE_TTL)
 
     stats = ["count", "distance", "moving_time", "elapsed_time", "elevation_gain"]
     stats = {k: cache.get(cache_prefix + k) for k in stats}
@@ -180,7 +180,7 @@ def main(config):
         display_header.append(render.Image(src = STRAVA_ICON))
     if period == "ytd":
         display_header.append(
-            render.Text(" %d" % year, font="tb-8")
+            render.Text(" %d" % year, font = "tb-8")
         )
 
     SPORT_ICON = {
@@ -225,7 +225,7 @@ def main(config):
                     children = [
                         render.Image(src = SPORT_ICON),
                         render.Text(" %s " % humanize.comma(float(stats.get("count", 0)))),
-                        render.Text(actu, font="tb-8"),
+                        render.Text(actu, font = "tb-8"),
                     ],
                 ),
                 render.Row(
@@ -233,7 +233,7 @@ def main(config):
                     children = [
                         render.Image(src = DISTANCE_ICON),
                         render.Text(" %s " % humanize.comma(float(stats.get("distance", 0)))),
-                        render.Text(distu, font="tb-8"),
+                        render.Text(distu, font = "tb-8"),
                     ],
                 ),
                 render.Row(
@@ -272,10 +272,10 @@ def oauth_handler(params):
 
 def get_access_token(access_code, secret):
     params = dict(
-        code=access_code,
-        client_secret=secret,
-        grant_type="authorization_code",
-        client_id=CLIENT_ID,
+        code = access_code,
+        client_secret = secret,
+        grant_type = "authorization_code",
+        client_id = CLIENT_ID,
     )
     query_params = "&".join(["%s=%s" % (k, v) for k, v in params.items()])
     print("https://www.strava.com/api/v3/oauth/token?%s" % query_params)
@@ -295,7 +295,7 @@ def get_access_token(access_code, secret):
     access_token = token_params["access_token"]
     athlete = int(float(token_params["athlete"]["id"]))
 
-    cache.set(GLOBAL_CACHE_PREFIX + "athlete_id", str(athlete), ttl_seconds=CACHE_TTL)
+    cache.set(GLOBAL_CACHE_PREFIX + "athlete_id", str(athlete), ttl_seconds = CACHE_TTL)
     cache.set(GLOBAL_CACHE_PREFIX + "access_token", access_token, ttl_seconds = int(token_params["expires_in"] - 30))
     cache.set(GLOBAL_CACHE_PREFIX + "refresh_token", refresh_token, ttl_seconds = int(token_params["expires_in"] - 30))
 
@@ -304,13 +304,14 @@ def get_access_token(access_code, secret):
 
 def display_failure(msg):
     return render.Root(
-        child = render.Column(children=[
-            render.Image(src = STRAVA_ICON),
-            render.Marquee(
-                width = 64,
-                child = render.Text(msg),
-            ),
-        ]
+        child = render.Column(
+            children = [
+                render.Image(src = STRAVA_ICON),
+                render.Marquee(
+                    width = 64,
+                    child = render.Text(msg),
+                ),
+            ],
         )
     )
 
@@ -318,19 +319,19 @@ def display_failure(msg):
 def get_schema():
 
     units_options = [
-        schema.Option(value="imperial", display="Imperial (US)"),
-        schema.Option(value="metric", display="Metric"),
+        schema.Option(value = "imperial", display = "Imperial (US)"),
+        schema.Option(value = "metric", display = "Metric"),
     ]
 
     period_options = [
-        schema.Option(value="all", display="All-time"),
-        schema.Option(value="ytd", display="YTD"),
+        schema.Option(value = "all", display = "All-time"),
+        schema.Option(value = "ytd", display = "YTD"),
     ]
 
     sport_options = [
-        schema.Option(value="ride", display="Cycling"),
-        schema.Option(value="run", display="Running"),
-        schema.Option(value="swim", display="Swimming"),
+        schema.Option(value = "ride", display = "Cycling"),
+        schema.Option(value = "run", display = "Running"),
+        schema.Option(value = "swim", display = "Swimming"),
     ]
 
     return schema.Schema(
