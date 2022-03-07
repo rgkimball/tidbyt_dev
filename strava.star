@@ -104,6 +104,7 @@ def main(config):
     sport = config.get("sport", DEFAULT_SPORT)
     units = config.get("units", DEFAULT_UNITS)
     period = config.get("period", DEFAULT_PERIOD)
+    show_logo = config.get("show_logo", True)
 
     cache_prefix = GLOBAL_CACHE_PREFIX + sport + period
 
@@ -174,9 +175,9 @@ def main(config):
 
     print(stats)
 
-    display_header = [
-        render.Image(src = STRAVA_ICON),
-    ]
+    display_header = []
+    if show_logo:
+        display_header.append(render.Image(src = STRAVA_ICON))
     if period == "ytd":
         display_header.append(
             render.Text(" %d" % year, font="tb-8")
@@ -371,6 +372,20 @@ def get_schema():
                 icon = "userClock",
                 options = period_options,
                 default = DEFAULT_PERIOD,
+            ),
+            schema.Toggle(
+                id = "show_logo",
+                name = "Logo",
+                desc = "Whether to display the Strava logo.",
+                icon = "cog",
+                default = True,
+            ),
+            schema.Text(
+                id = "dev_api_secret",
+                name = "API Secret",
+                desc = "Development-use only.",
+                icon = "cog",
+                default = '',
             ),
         ],
     )
