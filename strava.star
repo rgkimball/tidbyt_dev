@@ -2,7 +2,7 @@
 Applet: Strava Activities
 Summary: Displays your YTD or all-time athlete stats recorded on Strava
 License: MIT
-Author: rgkimball, March 2022
+Author: Rob Kimball (@rgkimball), March 2022
 """
 
 load("http.star", "http")
@@ -11,12 +11,14 @@ load("time.star", "time")
 load("cache.star", "cache")
 load("render.star", "render")
 load("schema.star", "schema")
+load("secret.star", "secret")
 load("humanize.star", "humanize")
+load("encoding/json.star", "json")
 load("encoding/base64.star", "base64")
 
 STRAVA_BASE = "https://www.strava.com/api/v3"
-ACCESS_TOKEN = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
-DEFAULT_ATHLETE = '51510797'
+CLIENT_ID = "48947"
+OAUTH2_CLIENT_SECRET = secret.decrypt("AV6+xWcEEKTdPxzqIIIEEQf6NY19IjtTDp+J6ELb2u9HK2bkmpkCMM/Z1o9U9/9zECzSqWzEVXeZgAOTHBUGyZ6iP75XTtQzS9SxbaIbgjC55justcT5nsgA4GwzxFphYKMSkuO9YnbUVAvyCCSKAmUe2l+bi5mPldcql6Mmi+j475iEKJerQ40wJ9OB7Q==")
 DEFAULT_UNITS = 'imperial'
 DEFAULT_SPORT = 'ride'
 DEFAULT_PERIOD = 'all'
@@ -29,15 +31,15 @@ PREVIEW_DATA = {
     'elevation_gain': 11800,
 }
 
-CACHE_PREFIX = 'strava_'
-CACHE_TTL = 60 * 60 * 24  # updates once daily
+GLOBAL_CACHE_PREFIX = 'strava_'
+CACHE_TTL = 60 * 60 * 1  # updates once hourly
 
 STRAVA_ICON = base64.decode("""
-iVBORw0KGgoAAAANSUhEUgAAACgAAAAICAYAAACLUr1bAAAAAXNSR0IArs4c6QAAAJ9JREFUOE+
-VVFsOgCAMg9t6JG+rgVhTl3ab/IDsQdd1zvGs6xwXztjnMaa6X3ZnW/ecB/HRX32vuOXPOXayvy
-AygLDFwvGoAqxsL0kMMFbvmOg8rgpn1uI5+gNLyaADowpz7cwkE9lj392NSoMdgF3tKjAOIKTyY
-TDTArPTKaqr62oQ7ZRWYo8tzgApfWFaOU4y7NjIfhfVkHDLXVu7AG9xpK01/VJ0qwAAAABJRU5E
-rkJggg==
+iVBORw0KGgoAAAANSUhEUgAAACgAAAAICAYAAACLUr1bAAAAAXNSR0IArs4c6QAAAJ1JREFUOE+
+lVEEOgCAMg9/6JH+LwVhTm3Us4gUZk3VtZ2/PM8428D7XfrQ+V40jZ55HZ/hO79X8aI96fMcvEG
+ggAx8B5IYZoJJhAWr3zCjAcI7G3D5iPQPICloGM6kq7ET2iGzjrIT4DXDlQ5XG5TNTuwDB4ofBz
+AuZxDvD5YYtBMiF2AcrBldFlE3kZ5P8qlGRtwLQ/ZKc76YiFYAXQTytNejult0AAAAASUVORK5C
+YII=
 """)
 
 RUN_ICON = base64.decode("""
@@ -79,45 +81,71 @@ jZCAAeN0X/v+8M56REZ86kKJPO+IY+DwWMYAV/g9X+g+iGVfeQ9EIUggziBGkCKYAnQ1SxPehng
 Gr1eimwzTjdSOy+wFaLiTvmqj9hwAAAABJRU5ErkJggg==
 """)
 
-headers = {
-    'Authorization': 'Bearer %s' % ACCESS_TOKEN
-}
-
 
 def main(config):
+
+    token = config.get("auth")
+    client_secret = OAUTH2_CLIENT_SECRET or 'e70fc23eca9f1156f7a3bf94fca7608e104542c9 '
+    access_token = cache.get(GLOBAL_CACHE_PREFIX + "access_token")
+    refresh_token = cache.get(GLOBAL_CACHE_PREFIX + "refresh_token")
+
+    if not token:
+        print('No authorized user found')
+        return display_failure('No user logged in - please check your applet settings')
+
+    if not access_token:
+        print('Generating new access token')
+        access_token = get_access_token(token, client_secret)
+
+    headers = {
+        'Authorization': 'Bearer %s' % access_token
+    }
+
     timezone = config.get("timezone") or "America/New_York"
     year = time.now().in_location(timezone).year
     sport = config.get('sport', DEFAULT_SPORT)
-    athlete = config.get('athlete_id', DEFAULT_ATHLETE)
     units = config.get('units', DEFAULT_UNITS)
     period = config.get('period', DEFAULT_PERIOD)
 
+    cache_prefix = GLOBAL_CACHE_PREFIX + sport + period
+
+    # Get logged in athlete
+    athlete = cache.get(GLOBAL_CACHE_PREFIX + 'athlete_id')
+    if not athlete:
+        print('Getting athlete ID from API, access_token was cached.')
+        url = "%s/athlete" % STRAVA_BASE
+        response = http.get(url, headers=headers)
+        if response.status_code != 200:
+            print('Strava API call failed with status %d' % response.status_code)
+
+        data = response.json()
+        athlete = int(float(data['id']))
+        cache.set(GLOBAL_CACHE_PREFIX + 'athlete_id', str(athlete), ttl_seconds=CACHE_TTL)
+
     stats = ['count', 'distance', 'moving_time', 'elapsed_time', 'elevation_gain']
+    stats = {k: cache.get(cache_prefix + k) for k in stats}
 
     # Optionally we can display dummy data if we need to test without the API
     # stats = {k: PREVIEW_DATA[k] for k in stats}
 
-    stats = {k: cache.get(CACHE_PREFIX + k) for k in stats}
-
     if None not in stats.values():
         print("Displaying cached data.")
     else:
-        print("Calling Strava API.")
         url = "%s/athletes/%s/stats" % (STRAVA_BASE, athlete)
+        print("Calling Strava API: " + url)
         response = http.get(url, headers=headers)
         if response.status_code != 200:
             fail('Strava API call failed with status %d' % response.status_code)
         data = response.json()
-        print(data)
 
         for item in stats.keys():
             stats[item] = data['%s_%s_totals' % (period, sport)][item]
-            cache.set(CACHE_PREFIX + item, str(stats[item]), ttl_seconds=CACHE_TTL)
-            print('saved item %s "%s" in the cache for %d seconds' % (item, str(stats[item]), CACHE_TTL))
+            cache.set(cache_prefix + item, str(stats[item]), ttl_seconds=CACHE_TTL)
+            #print('saved item %s "%s" in the cache for %d seconds' % (item, str(stats[item]), CACHE_TTL))
 
-    #################################################
-    # Configure the display to the user's preferences
-    #################################################
+    ###################################################
+    # Configure the display to the user's preferences #
+    ###################################################
 
     if units.lower() == 'imperial':
         if sport == 'swim':
@@ -137,13 +165,13 @@ def main(config):
         elevu = 'm'
 
     if sport == 'all':
-        if stats['count'] != 1:
+        if int(float(stats['count'])) != 1:
             actu = 'activities'
         else:
             actu = 'activity'
     else:
         actu = sport
-        if stats['count'] != 1:
+        if int(float(stats['count'])) != 1:
             actu += 's'
 
     print(stats)
@@ -168,12 +196,12 @@ def main(config):
         third_stat = [
              render.Image(src = ELEV_ICON),
              render.Text(
-                 " %s %s" % (humanize.comma(stats.get('elevation_gain', 0)), elevu),
+                 " %s %s" % (humanize.comma(float(stats.get('elevation_gain', 0))), elevu),
              ),
          ]
     else:
-        if stats.get('distance', 0) > 0:
-            split = stats.get('moving_time', 0) / stats.get('distance', 0)
+        if float(stats.get('distance', 0)) > 0:
+            split = float(stats.get('moving_time', 0)) / float(stats.get('distance', 0))
             split = time.parse_duration(str(split) + 's')
             split = format_duration(split)
         else:
@@ -197,7 +225,7 @@ def main(config):
                     cross_align = "center",
                     children = [
                         render.Image(src = SPORT_ICON),
-                        render.Text(" %s " % humanize.comma(stats.get('count', 0))),
+                        render.Text(" %s " % humanize.comma(float(stats.get('count', 0)))),
                         render.Text(actu, font="tb-8"),
                     ],
                 ),
@@ -205,7 +233,7 @@ def main(config):
                     cross_align = "center",
                     children = [
                         render.Image(src = DISTANCE_ICON),
-                        render.Text(" %s " % humanize.comma(stats.get('distance', 0))),
+                        render.Text(" %s " % humanize.comma(float(stats.get('distance', 0)))),
                         render.Text(distu, font="tb-8"),
                     ],
                 ),
@@ -234,11 +262,58 @@ def format_duration(d):
     m = int(d.minutes)
     s = str(int((d.minutes - m) * 60))
     m = str(m)
-    if len(m) == 1:
-        m = '0' + m
     if len(s) == 1:
         s = '0' + s
     return '%s:%s' % (m, s)
+
+def oauth_handler(params):
+    params = json.decode(params)
+    auth_code = params.get('code')
+    return auth_code
+
+def get_access_token(access_code, secret):
+    params = dict(
+        code=access_code,
+        client_secret=secret[:-1],
+        grant_type="authorization_code",
+        client_id=CLIENT_ID,
+    )
+    query_params = '&'.join(['%s=%s' % (k, v) for k, v in params.items()])
+    print("https://www.strava.com/api/v3/oauth/token?%s" % query_params)
+    res = http.post(
+        url = "https://www.strava.com/api/v3/oauth/token?%s" % query_params,
+        headers = {
+          "Accept": "application/json",
+        },
+        form_encoding = "application/x-www-form-urlencoded",
+    )
+    if res.status_code != 200:
+        fail("token request failed with status code: %d - %s" %
+             (res.status_code, res.body()))
+
+    token_params = res.json()
+    refresh_token = token_params["refresh_token"]
+    access_token = token_params["access_token"]
+    athlete = int(float(token_params['athlete']['id']))
+
+    cache.set(GLOBAL_CACHE_PREFIX + 'athlete_id', str(athlete), ttl_seconds=CACHE_TTL)
+    cache.set(GLOBAL_CACHE_PREFIX + "access_token", access_token, ttl_seconds = int(token_params["expires_in"] - 30))
+    cache.set(GLOBAL_CACHE_PREFIX + "refresh_token", refresh_token, ttl_seconds = int(token_params["expires_in"] - 30))
+
+    return access_token
+
+
+def display_failure(msg):
+    return render.Root(
+        child = render.Column(children=[
+            render.Image(src = STRAVA_ICON),
+            render.Marquee(
+                width = 64,
+                child = render.Text(msg),
+            ),
+        ]
+        )
+    )
 
 
 def get_schema():
@@ -249,31 +324,37 @@ def get_schema():
     ]
 
     period_options = [
-        schema.Option(value='ytd', display='YTD'),
         schema.Option(value='all', display='All-time'),
+        schema.Option(value='ytd', display='YTD'),
     ]
 
     sport_options = [
-        schema.Option(value='run', display='Running'),
         schema.Option(value='ride', display='Cycling'),
+        schema.Option(value='run', display='Running'),
         schema.Option(value='swim', display='Swimming'),
     ]
 
     return schema.Schema(
         version = "1",
         fields = [
-            schema.Text(
-                id = "athlete_id",
-                name = "Strava Athlete ID",
-                desc = "As found in your profile URL: https://strava.com/athletes/99999999",
+            schema.OAuth2(
+                id = "auth",
+                name = "Strava Login",
+                desc = "Connect to your Strava account",
                 icon = "user",
-                default = DEFAULT_ATHLETE,
+                client_id = str(CLIENT_ID),
+                handler = oauth_handler,
+                authorization_endpoint = "https://www.strava.com/oauth/authorize",
+                scopes = [
+                    'read',
+                    'activity:read',
+                ],
             ),
             schema.Dropdown(
                 id = "sport",
-                name = "What activity types do you want to display?",
-                desc = "Can choose between Run, Ride or Swim.",
-                icon = "rectangleList",
+                name = "What activity type do you want to display?",
+                desc = "Runs, rides or swims are all supported!",
+                icon = "running",
                 options = sport_options,
                 default = 'ride',
             ),
@@ -281,7 +362,7 @@ def get_schema():
                 id = "units",
                 name = "Which units do you want to display?",
                 desc = "Imperial displays miles and feet, metric displays kilometers and meters.",
-                icon = "quoteRight",
+                icon = "pencilRuler",
                 options = units_options,
                 default = DEFAULT_UNITS,
             ),
@@ -289,7 +370,7 @@ def get_schema():
                 id = "period",
                 name = "Display your all-time stats or YTD?",
                 desc = "YTD will also display the current year in the corner",
-                icon = "clock",
+                icon = "userClock",
                 options = period_options,
                 default = DEFAULT_PERIOD,
             ),
