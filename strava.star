@@ -176,7 +176,7 @@ def main(config):
     print(stats)
 
     display_header = []
-    if show_logo:
+    if show_logo == 'true':
         display_header.append(render.Image(src = STRAVA_ICON))
     if period == "ytd":
         display_header.append(
