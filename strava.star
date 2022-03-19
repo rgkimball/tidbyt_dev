@@ -187,7 +187,7 @@ def main(config):
             render.Image(src = ELEV_ICON),
             render.Text(
                 " %s %s" % (humanize.comma(float(stats.get("elevation_gain", 0))), elevu),
-                ),
+            ),
         ]
     else:
         if float(stats.get("distance", 0)) > 0:
@@ -201,7 +201,7 @@ def main(config):
             render.Image(src = CLOCK_ICON),
             render.Text(
                 " %s%s" % (split, "/" + distu),
-                ),
+            ),
         ]
 
     return render.Root(
