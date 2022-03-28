@@ -89,13 +89,13 @@ def main(config):
     timezone = config.get("$tz", "America/New_York")
     year = time.now().in_location(timezone).year
     cache_id = "%s/%s" % ("us-yield-curve", year)
-    color_choice = config.get("graph_color", "Blue")
+    color_choice = config.get("graph_color", "FactSet")
     color_vector = COLOR_VECTORS[color_choice]
 
     scale_axis = {
         "linear": linear_scale,
         "piecewise-log": piecewise_log,
-    }[config.get("x-axis", "linear")]
+    }[config.get("x-axis", "piecewise-log")]
 
     dates = cache.get(cache_id)
     if not dates:
