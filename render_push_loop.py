@@ -1,7 +1,8 @@
 import os
 from time import sleep
+from datetime import datetime as dt
 
-iter_seconds = 60 * 3
+iter_seconds = 6 * 3
 apps = [
     # ("usyieldcurve", "us_yield_curve"),
     ("finevent", "finevent"),
@@ -21,5 +22,5 @@ if __name__ == '__main__':
             push = f"{pixlet_exe} push --api-token {token} {device} --installation-id {direc} {app}.webp"
             os.system(render)
             os.system(push)
-        print(f"sleeping for {iter_seconds:,}")
+        print(f"[{dt.now()}] sleeping for {iter_seconds:,}")
         sleep(iter_seconds)
