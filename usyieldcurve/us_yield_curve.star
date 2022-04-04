@@ -87,7 +87,7 @@ def linear_scale(x):
 
 def main(config):
     timezone = config.get("$tz", "America/New_York")
-    year = time.now().in_location(timezone).year
+    year = time.now().in_location(timezone).year - 1
     cache_id = "%s/%s" % ("us-yield-curve", year)
     color_choice = config.get("graph_color", "Blue")
     color_vector = COLOR_VECTORS[color_choice]
@@ -95,7 +95,7 @@ def main(config):
     scale_axis = {
         "linear": linear_scale,
         "piecewise-log": piecewise_log,
-    }[config.get("x-axis", "linear")]
+    }[config.get("x-axis", "piecewise-log")]
 
     updated_date = None
     dates = cache.get(cache_id)
@@ -155,7 +155,7 @@ def main(config):
             )
         color = rgb_to_hex(*rgb)
         if i == len(dates) - 1:
-            color = "fff"
+            color = "999"
 
         curve = [(scale_axis(X_AXIS[k]), entry.get(k, 0.0)) for k in X_AXIS.keys()]
         plots.append(render.Plot(
