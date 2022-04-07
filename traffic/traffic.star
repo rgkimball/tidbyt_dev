@@ -269,8 +269,8 @@ def duration_to_string(sec):
     return timestring
 
 def main(config):
-    ors_key = config.get("ors_auth", None) or "5b3ce3597851110001cf6248f918ba38bb0f44c6aee57b6be7103041"
-    mq_key = config.get("mq_auth", None) # or "v9blvMn7zUNv4veMIQsDnQaEj5fJa9v5"
+    ors_key = config.get("ors_auth", None)
+    mq_key = config.get("mq_auth", None)
     mode = config.get("mode", MQ_MODES["Bike"])
 
     key = None
