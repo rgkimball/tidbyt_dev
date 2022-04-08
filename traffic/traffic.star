@@ -15,8 +15,8 @@ load("schema.star", "schema")
 load("encoding/json.star", "json")
 load("encoding/base64.star", "base64")
 
-ORS_URL = "https://api.openrouteservice.org"
 MQ_URL = "http://www.mapquestapi.com"
+ORS_URL = "https://api.openrouteservice.org"
 
 BASE_CACHE = "traffic"
 CACHE_TTL = {
@@ -136,7 +136,6 @@ def ors_directions(origin, destination, mode, key, **kwargs):
     start = ",".join((str(origin[1]), str(origin[0])))
     end = ",".join((str(destination[1]), str(destination[0])))
     cache_id = "%s/travel_time/%s/%s/%s/%s" % (BASE_CACHE, mode, start, end, json.encode(kwargs))
-    print(cache_id)
 
     data = cache.get(cache_id)
 
@@ -201,7 +200,6 @@ def mq_directions(origin, destination, mode, key, **kwargs):
     start = ",".join((str(origin[0]), str(origin[1])))
     end = ",".join((str(destination[0]), str(destination[1])))
     cache_id = "%s/travel_time/%s/%s/%s/%s" % (BASE_CACHE, mode, start, end, json.encode(kwargs))
-    print(cache_id)
 
     data = cache.get(cache_id)
 
@@ -329,7 +327,7 @@ def main(config):
             # MQ-specific settings:
             avoids=avoids,
             no_hills=no_hills,
-            prefer_bike_lanes=prefer_bike_lanes
+            prefer_bike_lanes=prefer_bike_lanes,
         )
         print("Got", raw_time, no_traffic)
         if not no_traffic:
@@ -344,8 +342,12 @@ def main(config):
                     break
         if no_traffic:
             travel_time = time.parse_duration("%ds" % raw_time)
-    elif not key:
-        travel_time = "%s requires a %s API key. Please check your settings!" % (mode, service)
+    elif key and not cfg_origin:
+        travel_time = "We need a starting point! Check your settings."
+    elif key and not cfg_destination:
+        travel_time = "We need a destination! Check your settings."
+    elif not key and cfg_origin and cfg_destination:
+        travel_time = "%s API key required." % service
 
     if type(travel_time) == "time.duration":
         travel_time = duration_to_string(travel_time.seconds)
@@ -366,7 +368,7 @@ def main(config):
                         render.Image(PIN_ICON),
                         render.Marquee(
                             width = 50,
-                            child = render.Text(str(origin_name), font = origin_font)
+                            child = render.Text(str(origin_name), font = origin_font),
                         ),
                     ]
                 ),
@@ -378,7 +380,7 @@ def main(config):
                         render.Image(FLAG_ICON),
                         render.Marquee(
                             width = 50,
-                            child = render.Text(str(destination_name), font = destination_font)
+                            child = render.Text(str(destination_name), font = destination_font),
                         ),
                     ]
                 ),
@@ -518,6 +520,10 @@ PIN_ICON = base64.decode("""iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAAXNS
 
 BIKE_ICON = base64.decode("""iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAAXNSR0IArs4c6QAAAHZJREFUKFNjZCASMBKpjgGuMCSv6j9M05pJbWDxhNpuuBiKicc0NOASME1WN24wgjSAFf7/////cU1NBpAgiA/SYHn9OgNIDEQzggBIEYhGlgRpQNYMVoOsEGQazFSYOMxGuNUgAZDJyKEAUgwVR/iaUDARHY4AjrtI0FBsjcUAAAAASUVORK5CYII=""")
 
+EBIKE_ICON = base64.decode("""iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAAXNSR0IArs4c6QAAAIFJREFUKFNjZCASMBKpjgGuMCSv6j9M05pJbWDxhNpuuBiKiYrTPsMlYJruZ/GC1YCJ/////1ea/oUBJgjScC+ThwEkBqIZQQCkiOEQB4PS1TdgQZgGmOZ72iIMDHY/GOAKQSaDFMNMhRkAdgJIIcxqsDsYGVHcDFYMFSc9eAiFJwBxuUFqGPJnQwAAAABJRU5ErkJggg==""")
+
+MTNBIKE_ICON = base64.decode("""iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAAXNSR0IArs4c6QAAAHhJREFUKFNjZCASMBKpjgFFYUhe1X+QxjWT2sDiCbXdYP6C5lJGDBN91geAJUFgS+AGuDyYMW/ePLDkOsFNcEmQhqD3fmANSUlJjIwgRSAGTAKdDTMIrhAkALMWZCXMALhCZKtBpiGHAsxJYKv9TPTgjscXVESHIwCT6UBs1TrXkQAAAABJRU5ErkJggg==""")
+
 CAR_ICON = base64.decode("""iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAAXNSR0IArs4c6QAAAKxJREFUKFNjZCASMCKrO6ah8R9dn9WNG2A1cIUgRW/3XmHI2/idYekkUwbbxjMMh+tNwPpAisEKQYp2r7nE0HT1F1gCpACkEMaGK9wuI/Pfc8EOuK3bEzwYYHww+8kTRkaQIkL+4efhYWD8f5D9v3qhIVztgm8fwOwELgG42M3+8wyM8+bN+98xZRZDRU4aA4wGqUAXA3tGzcgCbv2tcyewijFOWLKOoBtBhgEAPI5MoAfdihMAAAAASUVORK5CYII=""")
 
 BIKE_ICON2 = base64.decode("""iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAP0lEQVQY042NsQ2AQBDDYjqWYMTbvzMNBR9AwtUpUXzJX1TU3Ysul/B+b0kC0MXD0CbVmTlQBej1kr2pP981J/H6Q0DDzqOfAAAAAElFTkSuQmCC""")
@@ -534,8 +540,8 @@ MODE_ICONS = {
     "foot-hiking": WALK_ICON,
     "bicycle": BIKE_ICON,
     "cycling-regular": BIKE_ICON,
-    "cycling-electric": BIKE_ICON2,
+    "cycling-electric": EBIKE_ICON,
     "wheelchair": WHEELCHAIR_ICON,
     "cycling-road": BIKE_ICON,
-    "cycling-mountain": BIKE_ICON2,
+    "cycling-mountain": MTNBIKE_ICON,
 }
