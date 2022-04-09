@@ -32,7 +32,7 @@ SAMPLE_DATA = [
 ]
 DATEFMT = "2006-01-02T15:04:05"
 MAX_RELEASE_SECONDS = 60 * 9000  # we only show releases occurring the last/next N minutes
-DEFAULT_HIDDEN = False
+DEFAULT_HIDDEN = True
 REGIONS = {
     "Global": [],
     "US-only": ["United States"],

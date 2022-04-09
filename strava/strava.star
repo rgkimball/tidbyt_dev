@@ -31,7 +31,7 @@ PREVIEW_DATA = {
     "elevation_gain": 11800,
 }
 
-CACHE_TTL = 60 * 60 * 1  # updates once hourly
+CACHE_TTL = 60 * 60 * 24  # updates once daily
 
 STRAVA_ICON = base64.decode("""
 iVBORw0KGgoAAAANSUhEUgAAACgAAAAICAYAAACLUr1bAAAAAXNSR0IArs4c6QAAAJ1JREFUOE+
