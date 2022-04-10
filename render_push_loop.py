@@ -2,10 +2,12 @@ import os
 from time import sleep
 from datetime import datetime as dt
 
-iter_seconds = 60 * 3
+iter_seconds = 60 * 3000
 apps = [
     # ("usyieldcurve", "us_yield_curve"),
-    ("finevent", "finevent"),
+    # ("finevent", "finevent"),
+    # ("climateclock", "climate_clock"),
+    ("traffic", "traffic"),
 ]
 pixlet_exe = r"C:\Users\kimba\Code\tidbyt\pixlet.exe"
 token = os.environ.get("TIDBYT_API_KEY", None)
@@ -15,6 +17,8 @@ if __name__ == '__main__':
 
     pardir = os.getcwd()
 
+    start = dt.now()
+
     while True:
         for direc, app in apps:
             os.chdir(os.path.join(pardir, direc))
@@ -22,5 +26,5 @@ if __name__ == '__main__':
             push = f"{pixlet_exe} push --api-token {token} {device} --installation-id {direc} {app}.webp"
             os.system(render)
             os.system(push)
-            print(f"[{dt.now()}] sleeping for {iter_seconds:,}")
+            print(f"[{dt.now()}] sleeping for {iter_seconds:,}", dt.now(), dt.now() - start)
             sleep(iter_seconds)
