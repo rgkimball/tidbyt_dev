@@ -43,7 +43,7 @@ the time in red if we estimate the trip will be twice as long as it would be wit
 
 SAMPLE_DATA = {
     "coordinates": {
-        "origin": (40.667635, -73.795037),  # Kennedy Airport
+        "origin": (41.310141951963885, -72.92617064650368),  # Kennedy Airport
         "destination": (40.771771628998565, -73.97485055572092),  # Central Park
     },
     "labels": {
@@ -91,27 +91,98 @@ MQ_MODES = {  # "routeType" parameter
     "Bike": "bicycle",
 }
 
-# def get_location(text, key):
-#     cleaned = text.strip().lower()
-#     cache_id = "%s/location/%s" % (BASE_CACHE, cleaned)
-#
-#     data = cache.get(cache_id)
-#
-#     if not data:
-#         req_url = "%s/geocode/search/?api_key=%s&text=%s" % (ORS_URL, key, cleaned)
-#         print("Requesting data from API: %s" % req_url)
-#
-#         request = http.get(req_url)
-#         response = request.json()
-#
-#         if request.status_code != 200:
-#             print("API Failure: %s" % response.get("error", "No error message provided"))
-#         else:
-#             data = response
-#             cache.set(cache_id, json.encode(data), ttl_seconds = CACHE_TTL["location"])
-#
-#     print(data)
+def round(num, precision):
+    """Round a float to the specified number of significant digits"""
+    return math.round(num * math.pow(10, precision)) / math.pow(10, precision)
 
+def mq_reverse_geo(coordinates, key):
+    """
+    Reverse-search a pair of GPS coordinates using MapQuest to return the name, region and state/province of a location.
+
+    We also round coordinates to 4 decimal places (precision to 11.1 meters) and cache the results for a year.
+
+    :param coordinates: tuple of lat/lon as floats
+    :param key: string, MapQuest API Key
+    :return: tuple of address parts as strings
+    """
+    coordinates = [round(coordinates[0], 4), round(coordinates[1], 4)]
+
+    location = ",".join((str(coordinates[0]), str(coordinates[1])))
+    cache_id = "%s/travel_time/%s" % (BASE_CACHE, str(coordinates))
+
+    data = cache.get(cache_id)
+
+    if data:
+        print("Returning cached address from %s" % cache_id)
+        address_parts = json.decode(data)
+    else:
+        req_url = "%s/search/v2/radius?key=%s&origin=%s" % (MQ_URL, key, location)
+        print("Requesting directions from API: %s" % req_url)
+
+        request = http.get(req_url)
+        response = request.json()
+
+        if request.status_code != 200 or response.get("info", {}).get("statusCode", False) != 0:
+            print("API Failure: %s" % response.get("error", "No error message provided"))
+            return None
+        else:
+            results = response.get("searchResults", [])
+
+            if not len(results):
+                return None
+
+            # I'm feeling lucky:
+            first = results[0]
+            # We'll return address parts in a tuple and match the parts between origin/destination; we can then only
+            # display the more broad information if parts don't match (i.e. traveling between cities or countries)
+            address_parts = [first["fields"].get(item, None) for item in ["address", "city", "state", "country"]]
+            cache.set(cache_id, json.encode(address_parts), ttl_seconds = CACHE_TTL["directions"])
+
+    return address_parts
+
+def ors_reverse_geo(coordinates, key):
+    """
+    Reverse-search a pair of GPS coordinates using MapQuest to return the name, region and state/province of a location.
+
+    We also round coordinates to 4 decimal places (precision to 11.1 meters) and cache the results for a year.
+
+    :param coordinates: tuple of lat/lon as floats
+    :param key: string, OpenRouteService API Key
+    :return: tuple of address parts as strings
+    """
+    coordinates = [round(coordinates[0], 4), round(coordinates[1], 4)]
+    lat, lon = str(coordinates[0]), str(coordinates[1])
+    cache_id = "%s/travel_time/%s" % (BASE_CACHE, str(coordinates))
+
+    data = cache.get(cache_id)
+
+    if data:
+        print("Returning cached address from %s" % cache_id)
+        address_parts = json.decode(data)
+    else:
+        req_url = "%s/geocode/reverse?api_key=%s&point.lat=%s&point.lon=%s" % (ORS_URL, key, lat, lon)
+        print("Requesting data from API: %s" % req_url)
+
+        request = http.get(req_url)
+        response = request.json()
+
+        if request.status_code != 200:
+            print("API Failure: %s" % response.get("error", "No error message provided"))
+            return None
+        else:
+            results = response.get("features", [])
+
+            if not len(results):
+                return None
+
+            # I'm feeling lucky:
+            first = results[0]
+            # We'll return address parts in a tuple and match the parts between origin/destination; we can then only
+            # display the more broad information if parts don't match (i.e. traveling between cities or countries)
+            address_parts = [first["properties"].get(item, None) for item in ["name", "locality", "region", "country_a"]]
+            cache.set(cache_id, json.encode(address_parts), ttl_seconds = CACHE_TTL["directions"])
+
+    return address_parts
 
 def ors_directions(origin, destination, mode, key, **kwargs):
     """
@@ -237,6 +308,10 @@ def mq_directions(origin, destination, mode, key, **kwargs):
     travel_time = int(data.get("route", {}).get("time", None))
     travel_time_with_traffic = int(data.get("route", {}).get("realTime", None))
 
+    # This indicates some kind of data issue that we'll override with traffic-naive duration.
+    if travel_time_with_traffic == 10000000:
+        travel_time_with_traffic = travel_time
+
     print("Returning directions from %s to %s, estimated time %d vs. %d" % (start, end, travel_time_with_traffic, travel_time))
     return travel_time_with_traffic, travel_time
 
@@ -281,6 +356,16 @@ def main(config):
         key = mq_key
         service = "MapQuest"
 
+    search_key = None
+    reverse_search = lambda *_: None
+    # The reverse geo results from ORS are actually a little better than MapQuest, we'll take those unless we can't
+    if ors_key:
+        reverse_search = ors_reverse_geo
+        search_key = ors_key
+    elif mq_key:
+        reverse_search = mq_reverse_geo
+        search_key = mq_key
+
     data = SAMPLE_DATA
 
     origin = data["coordinates"]["origin"]
@@ -297,14 +382,38 @@ def main(config):
     cfg_destination = json.decode(config.get("destination", "{}"))
 
     # FOR TESTING PURPOSES:
-    cfg_origin, cfg_destination = True, True
+    # cfg_origin, cfg_destination = True, True
 
     if key and cfg_origin and cfg_destination:
-        # origin = (cfg_origin.get("lat"), cfg_origin.get("lng"))
-        # destination = (cfg_destination.get("lat"), cfg_destination.get("lng"))
+        origin = (cfg_origin.get("lat"), cfg_origin.get("lng"))
+        destination = (cfg_destination.get("lat"), cfg_destination.get("lng"))
 
-        origin_name = config.get("origin_label", "Start")
-        destination_name = config.get("destination_label", "End")
+        origin_name = config.get("origin_label", None)
+        destination_name = config.get("destination_label", None)
+
+        if not origin_name:
+            origin_name = reverse_search(origin, search_key)
+            if not origin_name:
+                origin_name = "Start"
+        if not destination_name:
+            destination_name = reverse_search(destination, search_key)
+            if not destination_name:
+                destination_name = "End"
+
+        if type(origin_name) == type(destination_name) and type(origin_name) == "list":
+            compare = list(zip(origin_name, destination_name))
+            different = []
+            for o, d in compare:
+                if o != d:
+                    different.append((o, d))
+            origin_name, destination_name = zip(*different)
+            origin_name = ", ".join(origin_name)
+            destination_name = ", ".join(destination_name)
+        elif type(origin_name) == "list":
+            origin_name = ", ".join(origin_name)
+        elif type(destination_name) == "list":
+            destination_name = ", ".join(destination_name)
+
         avoid_configs = {
             "avoid_bandt": ["Bridge", "Tunnel"],
             "avoid_ferry": ["Ferry"],
