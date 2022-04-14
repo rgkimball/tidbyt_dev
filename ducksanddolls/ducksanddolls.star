@@ -53,6 +53,10 @@ def main(config):
 
         exchange_rate = str((doll_hair_total / duck_total) * base_ex_rate)
 
+        print("duck total", duck_total)
+        print("doll total", doll_hair_total)
+        print("exchange rate", exchange_rate)
+
         cache.set(cache_id, exchange_rate)
 
     return render.Root(
