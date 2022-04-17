@@ -24,11 +24,11 @@ DEFAULT_SPORT = "ride"
 DEFAULT_SCREEN = "all"
 
 PREVIEW_DATA = {
-    "count": 108,
+    "count": 1408,
     "distance": 56159815,
     "moving_time": 2318919,
     "elapsed_time": 2615958,
-    "elevation_gain": 11800,
+    "elevation_gain": 125800,
 }
 
 CACHE_TTL = 60 * 60 * 24  # updates once daily
@@ -134,22 +134,26 @@ def progress_chart(config, refresh_token, sport, units):
             "Authorization": "Bearer %s" % access_token,
         }
 
+        # To help reduce the number of API calls we need, I'm querying both months together (current/prev commented)
+        # The consequence here is if the athlete completed more than 200 activities in the last 2 months we'll miss some
         urls = {
-            "current": "%s/athlete/activities?after=%s&per_page=%s" % (STRAVA_BASE, beg_curr_month.unix, MAX_ACTIVITIES),
-            "previous": "%s/athlete/activities?after=%s&before=%s&per_page=%s" % (STRAVA_BASE, beg_prev_month.unix, end_prev_month.unix, MAX_ACTIVITIES),
+            "last-2": "%s/athlete/activities?after=%s&per_page=%s" % (STRAVA_BASE, beg_prev_month.unix, MAX_ACTIVITIES),
+            # "current": "%s/athlete/activities?after=%s&per_page=%s" % (STRAVA_BASE, beg_curr_month.unix, MAX_ACTIVITIES),
+            # "previous": "%s/athlete/activities?after=%s&before=%s&per_page=%s" % (STRAVA_BASE, beg_prev_month.unix, end_prev_month.unix, MAX_ACTIVITIES),
         }
 
         activities = {}
 
         for query, url in urls.items():
-            cache_id = "%s/%s/activity/%s/%s-%s" % (refresh_token, sport, query, now.year, now.month)
+            cache_id = "%s/activity/%s/%s-%s" % (refresh_token, query, now.year, now.month)
             data = cache.get(cache_id)
 
             if not data:
                 print("Getting %s month activities. %s" % (query, url))
                 response = http.get(url, headers = headers)
                 if response.status_code != 200:
-                    print("Strava API call failed with status %d" % response.status_code)
+                    text = "code %d, %s" % (response.status_code, json.decode(response.body()).get("message", ""))
+                    return display_failure("Strava API failed, %s" % text)
                 data = response.json()
                 cache.set(cache_id, json.encode(data), ttl_seconds = CACHE_TTL)
             else:
@@ -164,6 +168,11 @@ def progress_chart(config, refresh_token, sport, units):
     # Sort each list chronologically
     for query in activities.keys():
         activities[query] = sorted(activities[query], key = lambda x: x["start_date"])
+
+    # Per above, split list into current and previous month
+    activities["current"] = [a for a in activities["last-2"] if time.parse_time(a["start_date"]) >= beg_curr_month]
+    activities["previous"] = [a for a in activities["last-2"] if time.parse_time(a["start_date"]) < beg_curr_month]
+    activities.pop("last-2", None)
 
     # Iterate through each activity from the current and previous month and extract the relevant data, adding it
     # to our cumulative totals as we go, which are later used in our plot.
@@ -259,105 +268,127 @@ def progress_chart(config, refresh_token, sport, units):
         if units == "imperial":
             value = meters_to_ft(value)
 
-        third_stat = {
-            "title": "Elev",
-            "value": int(value),
-        }
+        if value == 0 and len(curr_plot) > 0:
+            # We can assume the athlete is using a trainer here and would rather not see elevation
+            third_stat = {
+                "title": sport + "s",
+                "value": len(included_current_activities),
+            }
+        else:
+            third_stat = {
+                "title": "Elev",
+                "value": int(value),
+            }
     else:
         third_stat = {
             "title": sport + "s",
             "value": len(included_current_activities),
         }
 
+    frames = []
+    num_frames = len(prev_plot) + len(curr_plot)
+    for i in range(num_frames):
+        frames.append(
+            render.Stack(
+                children = [
+                    # Using a column here so I can place the logo in the bottom corner
+                    render.Row(
+                        expanded = True,
+                        main_align = "start",
+                        cross_align = "start",
+                        children = logo,
+                    ),
+                    render.Row(
+                        expanded = True,
+                        main_align = "end",
+                        cross_align = "end",
+                        children = [
+                            render.Column(
+                                expanded = True,
+                                main_align = "end",
+                                children = [
+                                    render.Plot(
+                                        data = prev_plot[0:i],
+                                        width = graph_width,
+                                        height = 22,
+                                        color = "#787878",
+                                        y_lim = (0.0, plot_height),
+                                        x_lim = (0.0, 1.0),
+                                        fill = False,
+                                    ),
+                                ],
+                            ),
+                        ],
+                    ),
+                    render.Row(
+                        expanded = True,
+                        main_align = "end",
+                        cross_align = "end",
+                        children = [
+                            render.Column(
+                                expanded = True,
+                                main_align = "end",
+                                children = [
+                                    render.Plot(
+                                        data = curr_plot[0:i - len(prev_plot)],
+                                        width = graph_width,
+                                        height = 22,
+                                        color = "#fc4c02",
+                                        y_lim = (0.0, plot_height),
+                                        x_lim = (0.0, 1.0),
+                                        fill = False,
+                                    ),
+                                ] if i > len(prev_plot) else [],
+                            ),
+                        ],
+                    ),
+                    render.Row(
+                        expanded = True,
+                        main_align = "space_evenly",
+                        cross_align = "center",
+                        children = [
+                            render.Column(
+                                main_align = "center",
+                                cross_align = "center",
+                                children = [
+                                    render.Text("Time", color = "#fc4c02", font = title_font),
+                                    render.Text(total_time, color = "#FFF"),
+                                ],
+                            ),
+                            render.Column(
+                                cross_align = "center",
+                                children = [
+                                    render.Text("Dist", color = "#fc4c02", font = title_font),
+                                    render.Text(
+                                        humanize.comma(int(distance_conv(cumulative_current["distance"]))),
+                                        color = "#FFF",
+                                    ),
+                                ],
+                            ),
+                            render.Column(
+                                main_align = "center",
+                                cross_align = "center",
+                                children = [
+                                    render.Text(third_stat["title"], color = "#fc4c02", font = title_font),
+                                    render.Text(
+                                        humanize.comma(third_stat["value"]),
+                                        color = "#FFF",
+                                    ),
+                                ],
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+        )
+
+    # Repeat last frame for a long time
+    frames.extend([frames[-1]] * 400)
+
     return render.Root(
-        child = render.Stack(
-            children = [
-                # Using a column here so I can place the logo in the bottom corner
-                render.Row(
-                    expanded = True,
-                    main_align = "start",
-                    cross_align = "start",
-                    children = logo,
-                ),
-                render.Row(
-                    expanded = True,
-                    main_align = "end",
-                    cross_align = "end",
-                    children = [
-                        render.Column(
-                            expanded = True,
-                            main_align = "end",
-                            children = [
-                                render.Plot(
-                                    data = prev_plot,
-                                    width = graph_width,
-                                    height = 22,
-                                    color = "#787878",
-                                    ylim = (0.0, plot_height),
-                                    xlim = (0.0, 1.0),
-                                    fill = False,
-                                ),
-                            ],
-                        ),
-                    ],
-                ),
-                render.Row(
-                    expanded = True,
-                    main_align = "end",
-                    cross_align = "end",
-                    children = [
-                        render.Column(
-                            expanded = True,
-                            main_align = "end",
-                            children = [
-                                render.Plot(
-                                    data = curr_plot,
-                                    width = graph_width,
-                                    height = 22,
-                                    color = "#fc4c02",
-                                    ylim = (0.0, plot_height),
-                                    xlim = (0.0, 1.0),
-                                    fill = False,
-                                ),
-                            ],
-                        ),
-                    ],
-                ),
-                render.Row(
-                    expanded = True,
-                    main_align = "space_evenly",
-                    cross_align = "center",
-                    children = [
-                        render.Column(
-                            cross_align = "center",
-                            children = [
-                                render.Text("Time", color = "#fc4c02", font = title_font),
-                                render.Text(total_time, color = "#FFF"),
-                            ],
-                        ),
-                        render.Column(
-                            cross_align = "center",
-                            children = [
-                                render.Text("Dist", color = "#fc4c02", font = title_font),
-                                render.Text(
-                                    humanize.comma(int(distance_conv(cumulative_current["distance"]))),
-                                    color = "#FFF",
-                                ),
-                            ],
-                        ),
-                        render.Column(
-                            cross_align = "center",
-                            children = [
-                                render.Text(third_stat["title"], color = "#fc4c02", font = title_font),
-                                render.Text(
-                                    humanize.comma(third_stat["value"]),
-                                    color = "#FFF",
-                                ),
-                            ],
-                        ),
-                    ],
-                ),
-            ],
+        delay = 50,
+        child = render.Animation(
+            children = frames,
         ),
     )
 
@@ -388,7 +419,8 @@ def athlete_stats(config, refresh_token, period, sport, units):
             url = "%s/athlete" % STRAVA_BASE
             response = http.get(url, headers = headers)
             if response.status_code != 200:
-                print("Strava API call failed with status %d" % response.status_code)
+                text = "code %d, %s" % (response.status_code, json.decode(response.body()).get("message", ""))
+                return display_failure("Strava API failed, %s" % text)
 
             data = response.json()
             athlete = int(float(data["id"]))
@@ -404,13 +436,21 @@ def athlete_stats(config, refresh_token, period, sport, units):
             print("Calling Strava API: " + url)
             response = http.get(url, headers = headers)
             if response.status_code != 200:
-                fail("Strava API call failed with status %d" % response.status_code)
+                text = "code %d, %s" % (response.status_code, json.decode(response.body()).get("message", ""))
+                return display_failure("Strava API failed, %s" % text)
             data = response.json()
 
-            for item in stats.keys():
-                stats[item] = data["%s_%s_totals" % (period, sport)][item]
-                cache.set(cache_prefix + item, str(stats[item]), ttl_seconds = CACHE_TTL)
-                #print("saved item %s "%s" in the cache for %d seconds" % (item, str(stats[item]), CACHE_TTL))
+            for per in ("ytd", "all"):
+                for sport_code in ("ride", "run", "swim"):
+                    this_cache_prefix = "%s/%s/%s/" % (refresh_token, sport_code, per)
+                    for item in stats.keys():
+                        if sport_code == sport:
+                            stats[item] = data["%s_%s_totals" % (per, sport_code)][item]
+                        cache.set(
+                            this_cache_prefix + item,
+                            str(data["%s_%s_totals" % (per, sport_code)][item]),
+                            ttl_seconds = CACHE_TTL,
+                            )
 
     # Configure the display to the user's preferences
     elevu = "m"
