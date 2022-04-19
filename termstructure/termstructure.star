@@ -15,6 +15,7 @@ load("schema.star", "schema")
 load("encoding/json.star", "json")
 
 CME_BASE = "https://www.cmegroup.com/CmeWS/mvc/Quotes/ContractsByNumber"
+CBOE_BASE = "https://cdn.cboe.com/api/global/delayed_quotes/term_structure"
 
 SAMPLE_DATA = {
     "price": [
@@ -60,6 +61,19 @@ CONTRACT_MONTHS = {
     "October": "V",
     "November": "X",
     "December": "Z",
+}
+
+# RGB Coefficients
+COLOR_VECTORS = {
+    "Red": (1.0, 0.1, 0.1),
+    "Green": (0.1, 1.0, 0.1),
+    "Blue": (0.1, 0.1, 1.0),
+    "Yellow": (1.0, 1.0, 0.1),
+    "Orange": (1.0, 0.66, 0.1),
+    "Purple": (0.5, 0.1, 1.0),
+    "Pink": (1.0, 0.1, 0.8),
+    "Bloomberg": (0.98, 0.545, 0.117),
+    "FactSet": (0.0, 0.682, 0.937),
 }
 
 # If the value has an integer ID, we can find it in the CME data. Otherwise, we'll override each special case.
@@ -276,44 +290,81 @@ def get_cme_data(cme_id):
         result.append(formatted)
 
     print(result)
-    return result
+    return {timestamp: result}
 
-def scale_time_axis(expiry):
-    current = time.now()
-    difference = (expiry - current).hours / 24
-    # print(current, expiry, difference)
-    if difference > 365:
-        return difference / 365 + 25
-    elif difference < 0:
-        return 0.0
+def get_cboe_data(contract = "VIX"):
+    timestamp = time.now()
+    cache_id = "termstructure/cboe/%s" % contract
+
+    data = cache.get(cache_id)
+    if not data:
+        url = "%s/%s/%s_%s.json" % (
+            CBOE_BASE,
+            timestamp.year,
+            contract,
+            timestamp.format("2006-01-02"),
+        )
+        print("Getting fresh data from %s" % url)
+
+        headers = {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
+            "Accept-Encoding": "json",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Host": "www.cboe.com",
+            "sec-ch-ua": "\"Not A;Brand\";v=\"99\", \"Chromium\";v=\"100\", \"Google Chrome\";v=\"100\"",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.88 Safari/537.36",
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": "Windows",
+        }
+        response = http.get(url, headers = headers)
+        print("Reply from CBOE", response, response.status_code)
+        if response.status_code != 200:
+            # We only print the error and then display whatever was cached if we can. Invalidation is manual.
+            print(response.body())
+        else:
+            data = response.json()
+            print("Cached data to %s" % cache_id)
+            cache.set(cache_id, json.encode(data))
     else:
-        return math.log(difference) * 4
+        print("Returning cached data from %s" % cache_id)
+        data = json.decode(data)
 
-def main(config):
-    contract = config.get("contract", "133")  # Default = ES
+    expirations = {
+        exp["symbol"]: time.parse_time(exp["expirationDate"], "02-Jan-2006")
+        for exp in data["data"]["expirations"]
+    }
+    prices = data["data"]["prices"]
+
+    time_series = {}
+    for price in prices:
+        exp = expirations[price["index_symbol"]]
+        item = {
+            "price_time": price["price_time"],
+            "code": contract,
+            "expiry": price["index_symbol"].replace(contract, ""),
+            "exp_date": exp,
+            "last": price["price"],
+        }
+        time_series.setdefault(price["price_time"], []).append(item)
+
+    return time_series
+
+def plot_current_data(config, data):
     COLOR_VOLUME = "#7189aa"
     COLOR_FILL = "#042a50"
     COLOR_LINE = "#FFFFFF"
     NO_COLOR = "#0000"
-    source = "Lookup"
-    print(contract, type(contract))
-    if re.match(r"^{.*}$", str(contract)):
-        contract = re.match(r"\"value\":\"(\w+)\"}", str(contract))
-        if len(contract):
-            contract = contract[0][1]  # this gives us the extracted value
-    if is_numeric(contract):
-        source = "CME"
-        contract = int(contract)
-    print("Displaying %s from %s" % (contract, source))
 
-    data = []
-    if source == "CME":
-        data = get_cme_data(contract)
-
-    last_price = 123.4
     if len(data):
-        contract = data[0]["code"]
-
+        price_time = list(data.keys())[0]
+        data = data[price_time]
         for row in data:
             row["display_price"] = 0.0
             row["display_volume"] = 0.0
@@ -323,9 +374,6 @@ def main(config):
             for vol in ["volume"]:
                 if is_numeric(row[vol]) and row[vol] != "-":
                     row["display_volume"] = float(row[vol].replace(",", ""))
-
-        last_price = data[0]["display_price"]
-        expiry = sorted(data, key = lambda r: r["display_volume"], reverse = True)[0]["expiry"]
         chrono_sorted = sorted(data, key = lambda r: r["exp_date"])
 
         plot_data = [
@@ -343,10 +391,6 @@ def main(config):
             )
             for row in chrono_sorted if row["display_price"] > 0
         ]
-
-        print("\n=== PLOT DATA === \n", plot_data)
-        print("\n=== VOLUME DATA === \n", volume_data)
-
     else:
         contract = "XX"
         expiry = CONTRACT_MONTHS[time.now().format("January")] + time.now().format("6")
@@ -422,9 +466,137 @@ def main(config):
                 ),
             )
 
+    return [
+        render.Plot(
+            data = plot_data,
+            width = width,
+            height = height,
+            color = COLOR_FILL,
+            y_lim = (min([v for _, v in plot_data]) * 0.98, max([v for _, v in plot_data]) * 1.05),
+            fill = True,
+        ),
+        render.Row(
+            expanded = True,
+            cross_align = "end",
+            children = bar_plots,
+        ),
+        render.Plot(
+            data = plot_data,
+            width = width,
+            height = height,
+            color = COLOR_LINE,
+            y_lim = (min([v for _, v in plot_data]) * 0.98, max([v for _, v in plot_data]) * 1.05),
+            fill = False,
+        ),
+    ]
+
+def plot_timeseries_data(config, data):
+    color_choice = config.get("graph_color", "FactSet")
+    color_vector = COLOR_VECTORS[color_choice]
+    dates = list(sorted(data.keys()))
+
+    max_len = max([len(data[d]) for d in dates])
+    # all_prices = []
+    # for d in dates:
+    #     for p in data[d]:
+    #         all_prices.append(p["last"])
+    min_price = min([p["last"] for d in dates for p in data[d]])
+    max_price = max([p["last"] for d in dates for p in data[d]])
+    dates = [d for d in dates if len(data[d]) == max_len]
+
+    plots = []
+    min_color = 15
+    for i, entry in enumerate(dates):
+        points = sorted(data[entry], key = lambda x: x["exp_date"])
+        c = 255 * (math.pow(1.01, i) / math.pow(1.01, len(dates)))
+        c_r, c_g, c_b = color_vector
+        rgb = (
+            max(min_color, int(c * c_r)),
+            max(min_color, int(c * c_g)),
+            max(min_color, int(c * c_b)),
+        )
+        color = rgb_to_hex(*rgb)
+        if i == len(dates) - 1:
+            color = "999"
+
+        curve = [(p["exp_date"].unix, p.get("last", 0.0)) for p in points]
+        print(i, entry, color, curve)
+        plots.append(render.Plot(
+            data = curve,
+            width = 64,
+            height = 32,
+            color = "#" + color,
+            y_lim = (min_price, max_price + 3),
+            fill = False,
+        ))
+
+    return plots
+
+def rgb_to_hex(r, g, b):
+    """Return 6-character hexadecimal color code from R/G/B values given as integers"""
+    ret = ""
+    for i in (r, g, b):
+        this = "%X" % i
+        if len(this) == 1:
+            this = "0" + this
+        ret = ret + this
+    return ret
+
+def scale_time_axis(expiry):
+    current = time.now()
+    difference = (expiry - current).hours / 24
+    # print(current, expiry, difference)
+    if difference > 365:
+        return difference / 365 + 25
+    elif difference < 0:
+        return 0.0
+    else:
+        return math.log(difference) * 4
+
+def main(config):
+    # contract = config.get("contract", "133")  # Default = ES
+    contract = config.get("contract", "VIX")
+    NO_COLOR = "#0000"
+    source = "Lookup"
+    print(contract, type(contract))
+    if re.match(r"^{.*}$", str(contract)):
+        contract = re.match(r"\"value\":\"(\w+)\"}", str(contract))
+        if len(contract):
+            contract = contract[0][1]  # this gives us the extracted value
+    if is_numeric(contract):
+        source = "CME"
+        contract = int(contract)
+    if contract == "VIX":
+        source = "CBOE"
+    print("Displaying %s from %s" % (contract, source))
+
+    data = {}
+    if source == "CME":
+        data = get_cme_data(contract)
+    elif source == "CBOE":
+        data = get_cboe_data(contract)
+
+    last_price = 22.24
+    expiry = ""
+    if len(data.keys()) > 1:
+        plots = plot_timeseries_data(config, data)
+        dates = list(sorted(data.keys()))
+
+        data[dates[-1]]
+    elif len(data.keys()) == 1:
+        plots = plot_current_data(config, data)
+        price_time = list(data.keys())[0]
+        contract = data[price_time][0]["code"]
+        last_price = data[price_time][0]["display_price"]
+        expiry = ":" + sorted(data[price_time], key = lambda r: r["display_volume"], reverse = True)[0]["expiry"]
+    else:
+        plots = [
+            render.Box(width = 1, height = 1)
+        ]
+
     legend = []
     if config.bool("legend", True):
-        legend_width = (len(contract) + len(expiry) + len(str(last_price)) + 3) * 4 - 1
+        legend_width = (len(contract) + len(expiry) + len(str(last_price)) + 2) * 4 - 1
         legend = [
             render.Box(
                 color = NO_COLOR,
@@ -438,7 +610,7 @@ def main(config):
                     padding = 1,
                     child = render.Row(
                         children = [
-                            render.Text("%s:%s " % (contract, expiry), font = "CG-pixel-3x5-mono"),
+                            render.Text("%s%s " % (contract, expiry), font = "CG-pixel-3x5-mono"),
                             render.Text(str(last_price), color = "#fb8b1e", font = "CG-pixel-3x5-mono"),
                         ]
                     ),
@@ -449,28 +621,7 @@ def main(config):
     return render.Root(
         delay = 1000,
         child = render.Stack(
-            children = [
-                render.Plot(
-                    data = plot_data,
-                    width = width,
-                    height = height,
-                    color = COLOR_FILL,
-                    ylim = (min([v for _, v in plot_data]) * 0.98, max([v for _, v in plot_data]) * 1.05),
-                    fill = True,
-                ),
-                render.Row(
-                    expanded = True,
-                    cross_align = "end",
-                    children = bar_plots,
-                ),
-                render.Plot(
-                    data = plot_data,
-                    width = width,
-                    height = height,
-                    color = COLOR_LINE,
-                    ylim = (min([v for _, v in plot_data]) * 0.98, max([v for _, v in plot_data]) * 1.05),
-                    fill = False,
-                ),
+            children = plots + [
                 render.Row(
                     expanded = True,
                     main_align = "end",
