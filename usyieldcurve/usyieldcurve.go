@@ -16,10 +16,10 @@ func New() manifest.Manifest {
 		ID:          "us-yield-curve",
 		Name:        "US Yield Curve",
 		Author:      "Rob Kimball",
-		Summary:     "Plots treasury rates",
+		Summary:     "Plot the yield curve rates",
 		Desc:        "Track changes to the yield curve over different US Treasury maturities.",
 		FileName:    "us_yield_curve.star",
 		PackageName: "usyieldcurve",
-		Source:  source,
+		Source:      source,
 	}
 }

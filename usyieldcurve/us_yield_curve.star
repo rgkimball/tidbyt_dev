@@ -91,6 +91,8 @@ def main(config):
     cache_id = "%s/%s" % ("us-yield-curve", year)
     color_choice = config.get("graph_color", "Blue")
     color_vector = COLOR_VECTORS[color_choice]
+    zoom = config.get("zoom", "0")
+    zoom = [] if zoom == "0" else [float(x) for x in zoom.split(",")]
 
     scale_axis = {
         "linear": linear_scale,
@@ -157,13 +159,39 @@ def main(config):
         if i == len(dates) - 1:
             color = "999"
 
-        curve = [(scale_axis(X_AXIS[k]), entry.get(k, 0.0)) for k in X_AXIS.keys()]
+        if len(zoom):
+            axis = {z: a for a, z in enumerate(zoom)}
+            print(axis)
+            if "linear" in str(scale_axis):
+                curve = [(scale_axis(X_AXIS[k]), entry.get(k, 0.0)) for k, v in X_AXIS.items() if v in zoom]
+            else:
+                curve = [(axis[v], entry.get(k, 0.0)) for k, v in X_AXIS.items() if v in zoom]
+            long = max(zoom)
+            short = min(zoom)
+            max_unit = "M" if long < 12 else "Y"
+            min_unit = "M" if short < 12 else "Y"
+            if long >= 12:
+                long //= 12
+            if short >= 12:
+                short //= 12
+            stats = {
+                "US %d%s " % (long, max_unit): round(curve[-1][1], 3),
+                "%d%s-%d%s " % (long, max_unit, short, min_unit): round(curve[-1][1] - curve[0][1], 3),
+            }
+            min_yield = min([v[1] for v in curve])
+            max_yield = max([v[1] for v in curve])
+        else:
+            curve = [(scale_axis(X_AXIS[k]), entry.get(k, 0.0)) for k in X_AXIS.keys()]
+            stats = {
+                "US 10Y ": round(dates[-1]["10YEAR"], 3),
+                "10Y-2Y ": round(dates[-1]["10YEAR"] - dates[-1]["2YEAR"], 3),
+            }
         plots.append(render.Plot(
             data = curve,
             width = 64,
             height = 32,
             color = "#" + color,
-            ylim = (min_yield - 0.25, max_yield + 0.25),
+            y_lim = (min_yield - 0.25, max_yield + 0.25),
             fill = False,
         ))
 
@@ -235,6 +263,14 @@ def get_schema():
                 icon = "paintBrush",
                 options = [schema.Option(value = c, display = c) for c in COLOR_VECTORS.keys()],
                 default = "Blue",
+            ),
+            schema.Dropdown(
+                id = "zoom",
+                name = "Zoom",
+                desc = "Display a subset of the curve.",
+                icon = "magnifyingGlass",
+                options = [schema.Option(value = v, display = k) for k, v in ZOOMS.items()],
+                default = "0",
             ),
         ],
     )
